@@ -1,6 +1,6 @@
 ---
 title: "MATH 216 Homework 3"
-author: "WRITE YOUR NAME HERE"
+author: "Shaojin Li"
 output: html_document
 ---
 
@@ -9,6 +9,8 @@ suppressPackageStartupMessages(library(ggplot2))
 suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(lubridate))
 suppressPackageStartupMessages(library(Quandl))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(tidyr))
 ```
 
 
@@ -16,8 +18,8 @@ suppressPackageStartupMessages(library(Quandl))
 
 Please indicate
 
-* Who you collaborated with:
-* Roughly how much time you spent on this HW:
+* Who you collaborated with: None
+* Roughly how much time you spent on this HW: 10 hrs
 * What gave you the most trouble:
 * Any comments you have: 
 
@@ -38,9 +40,6 @@ jukebox <- read.csv("data/jukebox.csv", header=TRUE) %>%
 ```
 
 
-
-
-
 ## Question 1:
 
 For this question we will be picking up from where we left off in HW-2,
@@ -49,12 +48,51 @@ specifically the OkCupid dataset.
 
 ### a)
 
-Using your exploratory data analysis from HW-2, fit a logistic regression to
-predict individual's gender and interpret your results.
+Using your exploratory data analysis from HW-2, fit a logistic regression to predict individual's gender and interpret the results for one continuous variable (if you used one) and one categorical variable of your choice
+
+When fitting the logistic regression, you can put both the categorical variable and the numerical variable you've chosen in the same model, that way you have more information to predict gender, and only have a single set of predictions to evaluate.
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
+#From HW2
+#Split off the essays into a separate data.frame
+essays<-select(profiles, contains("essay"))
+profiles<-select(profiles, -contains("essay"))
+# Define a binary outcome variable
+profiles<-mutate(profiles, is_female=ifelse(sex=="f", 1, 0))
 
+#Gender stats
+sex<-profiles %>%
+  group_by(sex) %>%
+  tally() %>%
+  rename(total_sex=n)
+
+#Heights info
+heights<-ggplot(data=profiles, aes(x=height, y=is_female)) +
+  geom_jitter() +
+  ggtitle("Height vs. Gender")+
+  ylab("Female?")+
+  xlab("Height")
+heights
+
+#Body type info (inspired by HW2 lab session)
+sex_body<-profiles %>% 
+  group_by(body_type, sex) %>% 
+  tally() %>% 
+  inner_join(sex, by="sex") %>% 
+  mutate(prop=n/total_sex)
+kable(sex_body)
+
+#Regression of gender on heights & body type
+profiles_1a<-profiles %>%
+  mutate(curvy=ifelse(body_type %in% c("curvy"),1,0)) %>%
+  na.omit(height)
+
+model1<-glm(is_female~height+curvy, data=profiles_1a, family=binomial(link="logit"))
+
+kable(summary(model1)$coef, digits=2)
 ```
+
+From the regression table we can see that there is a decrease of exp(-0.63) in the odds of being female when height increase 1 inch. There is an increase of exp(4.03) in the odds of being female when "curvy" is used for body type description. 
 
 
 ### b)
@@ -62,7 +100,22 @@ predict individual's gender and interpret your results.
 Plot a histogram of the fitted probabilities $\widehat{p}_i$ for all users $i=1,
 \ldots, n=59946$ in your dataset.
 
+
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
+
+profiles_1a$fitted_female<-fitted(model1)
+
+#Plot histogram of fitted probabilities
+#Draw a line at 0.5, for everyone who has a probability>0.5, predict 
+#they are female; if <0.5, predict they are male
+
+plot1b<-ggplot(data=profiles_1a, aes(x=fitted_female))+
+  geom_histogram(binwidth=0.1, boundary=0)+
+  ggtitle("Fitted Probabilities of Being Female")+
+  xlab("Probability")+
+  ylab("Count")+
+  geom_vline(xintercept = 0.5, col="red")
+plot1b
 
 ```
 
@@ -81,10 +134,20 @@ your table should be $n=59946$. Comment on how well our predictions fared.
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
 
+#Compare my prediction and the actual data, see how well we actually predict
+profiles_1a$predict_female<-ifelse(profiles_1a$fitted_female>0.5, 1, 0)
+
+table1c<-profiles_1a %>%
+  group_by(predict_female, is_female) %>%
+  tally() %>%
+  spread(is_female, n)
+
+kable(table1c)
 ```
 
+The prediction is not so accurate. Our prediction is right only if "predict_female" equalts to "is_female", which means that there are 6239 people who are male but we predict them to be female, and there are 3024 female who we predict them to be male. But because we only use two factors, heights and "curvy", to predict for gender, it is a pretty good estimation. 
 
-### d)
+### d) (bonus)
 
 Say we wanted to have a **false positive rate** of about 20%, i.e. of the people
 we predicted to be female, we want to be wrong no more than 20% of the time. What
@@ -93,9 +156,6 @@ decision threshold $p^*$ should we use?
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
 
 ```
-
-
-
 
 
 ## Question 2:
@@ -111,10 +171,43 @@ What seasonal (i.e. cyclical) patterns do you observe?
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
 
+#Change date & time format
+jukebox <- jukebox %>%
+  mutate(new_date=parse_date_time(date_time, "%b %d %H%M%S %Y")) %>%
+  mutate(week=round_date(new_date, "week"))
+
+#Round to the nearest week and count number of songs
+jukebox2<-jukebox %>%
+  mutate(week=round_date(new_date, unit=c("week"))) %>%
+  mutate(year=year(new_date)) %>%
+  group_by(week) %>% 
+  tally() %>%
+  rename(num_songs=n)
+
+#Plot of a time series of the number of songs played each week 
+#over the entire time period
+plot2a<-ggplot(jukebox2, aes(week, num_songs))+
+  geom_line()+
+  ggtitle("Number of Songs Played Each Week")
+plot2a
+
+#We see a similar pattern. Take a closer look at only two years
+#Plot of a time series of the number of songs played each week in 2005 and 2006
+jukebox3<-jukebox %>%
+  mutate(week=round_date(new_date, unit=c("week"))) %>%
+  mutate(year=year(new_date)) %>%
+  subset(year %in% c("2005","2006"))%>%
+  group_by(week) %>% 
+  tally() %>%
+  rename(num_songs=n)
+
+plot2b<-ggplot(jukebox3, aes(week, num_songs))+
+  geom_line()+
+  ggtitle("Number of Songs Played Each Week (2005-2006)")
+plot2b
+
 ```
-
-
-
+From the plot that has year 2004-2009 we see cyclical patterns of the number of songs played each week. After taking a closer look at year 2005 and 2006, we see that in January and around July the number of songs played drops a lot. 
 
 
 ## Question 3:
@@ -127,10 +220,19 @@ shift" during the academic year? Define
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
 
+jukebox4<-jukebox %>%
+  mutate(year=year(new_date),
+         month=month(new_date), 
+         hour= hour(new_date))%>% 
+  filter(hour<8) %>%
+  filter(month>=9 | month<=5) %>% 
+  group_by(artist) %>% 
+  tally() %>% 
+  arrange(desc(n)) %>%
+  rename(num_songs=n)
+
+kable(head(jukebox4, 10)) 
 ```
-
-
-
 
 
 ## Question 4:
@@ -146,13 +248,43 @@ insight to a foreign currency exchanger.
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
 
+#Relative change of bitcoin price
+bitcoin<-Quandl("BAVERAGE/USD",start_date="2011-01-01") %>% 
+  tbl_df() %>% 
+  rename(now=`24h Average`) %>% 
+  arrange(Date) %>%
+  mutate(previous=lag(now),
+         diff_b=(now-previous)/previous) %>%
+  select(Date, diff_b) %>%
+  na.omit()
+
+#Relative change of gold price
+gold<-Quandl("BUNDESBANK/BBK01_WT5511",start_date="2011-01-01") %>% 
+  tbl_df() %>% 
+  rename(now=Value)%>%
+  arrange(Date) %>%
+  mutate(previous=lag(now),
+         diff_g=(now-previous)/previous) %>%
+  select(Date, diff_g) %>%
+  na.omit()
+
+#Join two datasets
+gold_bitcoin<-full_join(bitcoin, gold, by="Date") %>%
+  na.omit()
+
+plot4<-ggplot(data=gold_bitcoin, aes(x=Date)) +
+  geom_line(aes(y=diff_b, colour="Bitcoin")) + 
+  geom_line(aes(y=diff_g, colour="Gold"))+ 
+  ggtitle("Price Volatility of Bitcoin and Gold")+
+  ylab("Price Volatility")+
+  xlab("Year")
+plot4
+
 ```
+As shown in the graph, the price volatility of bitcoin is way higher than that of gold. Therefore, gold should be a better choice of foreign currency exchanger.
 
 
-
-
-
-## Question 5:
+## Question 5: (bonus)
 
 Using the data loaded from Quandl below, plot a time series using `geom_line()`
 comparing cheese and milk production in the US from 1930 to today. Comment on this.
@@ -161,9 +293,9 @@ comparing cheese and milk production in the US from 1930 to today. Comment on th
 * Milk [page](https://www.quandl.com/data/USDANASS/NASS_MILKPRODUCTIONMEASUREDINLB-Milk-Production-Measured-In-Lb)
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
-cheese <- Quandl("USDANASS/NASS_CHEESEPRODUCTIONMEASUREDINLB") %>% 
-  tbl_df()
-milk <-  Quandl("USDANASS/NASS_MILKPRODUCTIONMEASUREDINLB") %>% 
-  tbl_df()
+#cheese <- Quandl("USDANASS/NASS_CHEESEPRODUCTIONMEASUREDINLB") %>% 
+#  tbl_df()
+#milk <-  Quandl("USDANASS/NASS_MILKPRODUCTIONMEASUREDINLB") %>% 
+#  tbl_df()
 ```
 
